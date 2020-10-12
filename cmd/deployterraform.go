@@ -16,7 +16,7 @@ var terraformCmd = &cobra.Command{
 	Example: `pandacli deploy terraform`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) != 0 {
-			return errors.New("requires a name argument")
+			return errors.New("does not require extra arguments")
 		}
 		return nil
 	},
