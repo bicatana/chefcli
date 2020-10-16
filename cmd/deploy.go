@@ -22,6 +22,6 @@ var deployCmd = &cobra.Command{
 }
 
 func init() {
-	//	deployCmd.AddCommand(lambdaCmd)
-	deployCmd.AddCommand(terraformCmd)
+	deployCmd.AddCommand(deployLambdaCmd)
+	deployCmd.AddCommand(terraformDeployCmd)
 }

@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var terraformCmd = &cobra.Command{
+var terraformDeployCmd = &cobra.Command{
 	Use:     "terraform",
 	Short:   "Deploy your Terraform code",
 	Long:    `Deploy your Terraform code from the current folder.`,

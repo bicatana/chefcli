@@ -7,6 +7,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type Lambda struct {
+	Zipfile  string ""
+	Bucket   string ""
+	Function string ""
+	Handler  string ""
+	Resource string ""
+	Runtime  string ""
+}
+
+type Terraform struct {
+	Tfplan string ""
+}
+
 var version string
 
 // rootCmd represents the base command when called without any subcommands
@@ -27,8 +40,8 @@ var rootCmd = &cobra.Command{
 	Example: 
 	pandacli deploy terraform`,
 	ValidArgs: []string{
-		"terraform",
-		"lambda",
+		"deploy",
+		//	"create",
 	},
 	Args:    cobra.OnlyValidArgs,
 	Version: version,
@@ -45,4 +58,5 @@ func Execute() {
 
 func init() {
 	rootCmd.AddCommand(deployCmd)
+	//	rootCmd.AddCommand(createCmd)
 }
