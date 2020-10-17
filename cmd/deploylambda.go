@@ -12,12 +12,12 @@ import (
 )
 
 var (
-	lambdazipfile  string
-	lambdabucket   string
-	lambdafunction string
-	lambdahandler  string
-	lambdaresource string
-	lambdaruntime  string
+	lambdaZipFile  string
+	lambdaBucket   string
+	lambdaFunction string
+	lambdaHandler  string
+	lambdaARN      string
+	lambdaRuntime  string
 )
 
 var deployLambdaCmd = &cobra.Command{
@@ -38,7 +38,7 @@ var deployLambdaCmd = &cobra.Command{
 		fmt.Println("Lambda called")
 		//	fmt.Println(args)
 
-		if lambdabucket == "" || lambdaresource == "" {
+		if lambdaBucket == "" || lambdaARN == "" {
 			fmt.Println("You must supply a zip file name, bucket name, function name, handler, ARN, and runtime.")
 			os.Exit(0)
 		}
@@ -51,30 +51,27 @@ var deployLambdaCmd = &cobra.Command{
 
 		svc := lambda.New(sess)
 
-		contents, err := ioutil.ReadFile(lambdazipfile + ".zip")
-		if err != nil {
-			fmt.Println("Could not read " + lambdazipfile + ".zip")
-			os.Exit(0)
-		}
+		contents, err := ioutil.ReadFile(lambdaZipFile + ".zip")
+		CheckError(err)
 
-		lambdacode := &lambda.FunctionCode{
-			S3Bucket:        &lambdabucket,
-			S3Key:           &lambdazipfile,
+		lambdaCode := &lambda.FunctionCode{
+			S3Bucket:        &lambdaBucket,
+			S3Key:           &lambdaZipFile,
 			S3ObjectVersion: aws.String(""),
 			ZipFile:         contents,
 		}
 
-		lambdaargs := &lambda.CreateFunctionInput{
-			Code:         lambdacode,
-			FunctionName: &lambdafunction,
-			Handler:      &lambdahandler,
-			Role:         &lambdaresource,
-			Runtime:      &lambdaruntime,
+		lambdaArgs := &lambda.CreateFunctionInput{
+			Code:         lambdaCode,
+			FunctionName: &lambdaFunction,
+			Handler:      &lambdaHandler,
+			Role:         &lambdaARN,
+			Runtime:      &lambdaRuntime,
 		}
 
-		result, err := svc.CreateFunction(lambdaargs)
+		result, err := svc.CreateFunction(lambdaArgs)
 		if err != nil {
-			fmt.Println("Cannot create function: " + err.Error())
+			CheckError(err)
 		} else {
 			fmt.Println(result)
 		}
@@ -83,12 +80,12 @@ var deployLambdaCmd = &cobra.Command{
 
 func init() {
 
-	deployLambdaCmd.PersistentFlags().StringVar(&lambdazipfile, "zipfile", "", "zipfile description.")
-	deployLambdaCmd.PersistentFlags().StringVar(&lambdabucket, "bucket", "", "bucket description.")
-	deployLambdaCmd.PersistentFlags().StringVar(&lambdafunction, "function", "", "function description.")
-	deployLambdaCmd.PersistentFlags().StringVar(&lambdahandler, "handler", "", "handler description.")
-	deployLambdaCmd.PersistentFlags().StringVar(&lambdaresource, "resource", "", "resource description.")
-	deployLambdaCmd.PersistentFlags().StringVar(&lambdaruntime, "runtime", "", "runtime description.")
+	deployLambdaCmd.PersistentFlags().StringVar(&lambdaZipFile, "zipfile", "", "zipfile description.")
+	deployLambdaCmd.PersistentFlags().StringVar(&lambdaBucket, "bucket", "", "bucket description.")
+	deployLambdaCmd.PersistentFlags().StringVar(&lambdaFunction, "function", "", "function description.")
+	deployLambdaCmd.PersistentFlags().StringVar(&lambdaHandler, "handler", "", "handler description.")
+	deployLambdaCmd.PersistentFlags().StringVar(&lambdaARN, "arn", "", "resource description.")
+	deployLambdaCmd.PersistentFlags().StringVar(&lambdaRuntime, "runtime", "", "runtime description.")
 
 	deployLambdaCmd.MarkPersistentFlagRequired("zipfile")
 	deployLambdaCmd.MarkPersistentFlagRequired("function")
