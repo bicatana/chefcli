@@ -1,7 +1,7 @@
 package main
 
 import (
-	"pandacli/cmd"
+	"chefcli/cmd"
 )
 
 func main() {

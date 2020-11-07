@@ -23,8 +23,8 @@ var (
 	deleteFlag  bool
 )
 
-var deployCmd = &cobra.Command{
-	Use:   "deploy",
+var cookCmd = &cobra.Command{
+	Use:   "cook",
 	Short: "Deploy Terraform and Lambda function ",
 	Long:  `This deploys your Terraform code and Lambda function.`,
 	ValidArgs: []string{
@@ -36,7 +36,7 @@ var deployCmd = &cobra.Command{
 	DisableFlagsInUseLine: true,
 	Run: func(cmd *cobra.Command, args []string) {
 
-		fmt.Println("deploy initialized")
+		fmt.Println("cooking initialized")
 
 		//Kudos to Stefan Sundin for the AWS Key Rotate piece. See https://github.com/stefansundin/aws-rotate-key
 		// Get credentials
@@ -210,10 +210,12 @@ func pluralize(n int) string {
 
 func init() {
 
-	deployCmd.PersistentFlags().StringVar(&profileFlag, "profile", "", "AWS Profile Description.")
-	deployCmd.PersistentFlags().BoolVar(&yesFlag, "yes", false, "Yes Flag Description.")
-	deployCmd.PersistentFlags().BoolVar(&deleteFlag, "delete", false, "Delete Flag Description.")
+	cookCmd.PersistentFlags().StringVar(&profileFlag, "profile", "", "AWS Profile Description.")
+	cookCmd.PersistentFlags().BoolVar(&yesFlag, "yes", false, "Yes Flag Description.")
+	cookCmd.PersistentFlags().BoolVar(&deleteFlag, "delete", false, "Delete Flag Description.")
 
-	deployCmd.AddCommand(deployLambdaCmd)
-	deployCmd.AddCommand(terraformDeployCmd)
+	cookCmd.AddCommand(cookLambdaCmd)
+	cookCmd.AddCommand(cookTerraformCmd)
+	cookCmd.AddCommand(cookFlaskCmd)
+	cookCmd.AddCommand(cookLayerCmd)
 }

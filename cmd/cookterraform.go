@@ -9,11 +9,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var terraformDeployCmd = &cobra.Command{
+var (
+	tfout    bytes.Buffer
+	tfstderr bytes.Buffer
+)
+
+var cookTerraformCmd = &cobra.Command{
 	Use:     "terraform",
 	Short:   "Deploy your Terraform code",
 	Long:    `Deploy your Terraform code from the current folder.`,
-	Example: `pandacli deploy terraform`,
+	Example: `cookcli deploy terraform`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) != 0 {
 			return errors.New("does not require extra arguments")
@@ -24,15 +29,12 @@ var terraformDeployCmd = &cobra.Command{
 
 		command := exec.Command("/usr/local/bin/terraform", "apply -auto-approve")
 
-		var out bytes.Buffer
-		var stderr bytes.Buffer
-
-		command.Stdout = &out
-		command.Stderr = &stderr
+		command.Stdout = &tfout
+		command.Stderr = &tfstderr
 
 		err := command.Run()
 		if err != nil {
-			fmt.Println(fmt.Sprint(err) + ": " + stderr.String())
+			fmt.Println(fmt.Sprint(err) + ": " + tfstderr.String())
 			return
 		}
 		fmt.Println("Result: " + out.String())
