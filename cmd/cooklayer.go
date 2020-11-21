@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"archive/zip"
+	"bufio"
 	"bytes"
 	"fmt"
 	"io/ioutil"
@@ -10,7 +11,6 @@ import (
 	"os/exec"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/lambda"
 	"github.com/spf13/cobra"
@@ -109,6 +109,7 @@ var cookLayerCmd = &cobra.Command{
 				}
 			}
 
+			// ensure description is blank if it is empty
 			if cb.Description == "" {
 				cb.Description = ""
 			}
@@ -121,6 +122,8 @@ var cookLayerCmd = &cobra.Command{
 				fmt.Println("A folder named python already exists. ChefCLI uses that folder for handling the layer cooking, please move it or delete it so that ChefCLI can use it.")
 				os.Exit(0)
 			}
+			errDir := os.MkdirAll("python/lib/"+cb.Runtime+"/site-packages", 0755)
+			CheckError(errDir)
 
 			// check that a requirements.txt file exists
 			if !FileExists("requirements.txt") {
@@ -128,21 +131,32 @@ var cookLayerCmd = &cobra.Command{
 				os.Exit(0)
 			}
 
-			script := []byte("#!/bin/bash\nexport PKG_DIR='python'\nrm -rf ${PKG_DIR} && mkdir -p ${PKG_DIR}\ndocker run --rm -v $(pwd):/layers -w /layers lambci/lambda:build-python3.8 \\ \n pip3 install -r requirements.txt --no-deps -t ${PKG_DIR}")
+			// Old script, keeping this for reference
+			//			script := []byte("#!/bin/bash\nexport PKG_DIR='python'\nrm -rf ${PKG_DIR} && mkdir -p ${PKG_DIR}\ndocker run --rm -v $(pwd):/layers -w /layers lambci/lambda:build-python3.8 \\ \n pip3 install -r requirements.txt --no-deps -t ${PKG_DIR}")
 
-			err = ioutil.WriteFile("get_layer_packages.sh", script, 0644)
+			// Script to leverage Docker to build layer libraries, see https://aws.amazon.com/premiumsupport/knowledge-center/lambda-layer-simulated-docker/ for more information
+			script := []byte("#!/bin/bash\ndocker run -v \"$PWD\":/var/task \"lambci/lambda:build-python3.8\" /bin/sh -c \"pip3 install -r requirements.txt -t python/lib/python3.8/site-packages/ --no-deps\"")
+
+			// write script
+			err = ioutil.WriteFile("python/get_layer_packages.sh", script, 0644)
 			CheckError(err)
 
-			command := exec.Command("/bin/sh", "get_layer_packages.sh")
+			// execute command
+			command := exec.Command("/bin/sh", "python/get_layer_packages.sh")
 			command.Stdout = &layerout
 			command.Stderr = &layerstderr
 
+			// run execution
 			err = command.Run()
 			if err != nil {
 				fmt.Println(fmt.Sprint(err) + ": " + layerstderr.String())
 				return
 			}
 			fmt.Println("Result: " + out.String())
+
+			// removing singular file as opposed to using os.RemoveAll
+			err = os.Remove("python/get_layer_packages.sh")
+			CheckError(err)
 
 			// Get a Buffer to Write To
 			outFile, err := os.Create(cb.Function + "_layers.zip")
@@ -161,20 +175,20 @@ var cookLayerCmd = &cobra.Command{
 				fmt.Println("ZIP archive is ready. The name of the archive is " + cb.Function + "_layers.zip")
 			}
 
-			//			os.RemoveAll
-			err = os.Remove("get_layer_packages.sh")
-			CheckError(err)
-
+			// check --now flag to publish layer
 			if Now {
-				// Publish layer
-				svc := lambda.New(session.New())
+				// Publish layer leveraging shared config to pickup region configuration
+				sess := session.Must(session.NewSessionWithOptions(session.Options{
+					SharedConfigState: session.SharedConfigEnable,
+				}))
+
+				svc := lambda.New(sess)
 
 				contents, err := ioutil.ReadFile(cb.Function + "_layers.zip")
 				CheckError(err)
 
 				input := &lambda.PublishLayerVersionInput{
 					CompatibleRuntimes: []*string{
-						aws.String("python3.7"),
 						aws.String("python3.8"),
 					},
 					Content: &lambda.LayerVersionContentInput{
@@ -184,32 +198,44 @@ var cookLayerCmd = &cobra.Command{
 					LayerName:   &cb.Layer,
 					//				LicenseInfo: aws.String("MIT"),
 				}
-
+				// getting the result of the publish layer operation
 				result, err := svc.PublishLayerVersion(input)
-				if err != nil {
-					if aerr, ok := err.(awserr.Error); ok {
-						switch aerr.Code() {
-						case lambda.ErrCodeServiceException:
-							fmt.Println(lambda.ErrCodeServiceException, aerr.Error())
-						case lambda.ErrCodeResourceNotFoundException:
-							fmt.Println(lambda.ErrCodeResourceNotFoundException, aerr.Error())
-						case lambda.ErrCodeTooManyRequestsException:
-							fmt.Println(lambda.ErrCodeTooManyRequestsException, aerr.Error())
-						case lambda.ErrCodeInvalidParameterValueException:
-							fmt.Println(lambda.ErrCodeInvalidParameterValueException, aerr.Error())
-						case lambda.ErrCodeCodeStorageExceededException:
-							fmt.Println(lambda.ErrCodeCodeStorageExceededException, aerr.Error())
-						default:
-							fmt.Println(aerr.Error())
-						}
-					} else {
-						// Print the error, cast err to awserr.Error to get the Code and
-						// Message from an error.
-						fmt.Println(err.Error())
-					}
-					os.Exit(0)
+				if CheckAWSError(err) {
+					os.Exit(1)
 				}
-				fmt.Println(result)
+				//fmt.Println(result)
+				// we want to check if we are going to add the layer to our Lambda function
+				fmt.Println("Layer built. Do you want to add it to your Lambda function, " + cb.Function + "? [yes/no]")
+				userInput := bufio.NewScanner(os.Stdin)
+				userInput.Scan()
+				//				fmt.Printf("%v", input.Text())
+				if userInput.Text() != "yes" && userInput.Text() != "no" {
+					fmt.Println("Please type either 'yes' or 'no'.")
+					os.Exit(1)
+				}
+				if userInput.Text() == "no" {
+					fmt.Println("Understood. The new layer version is not added to the Lambda function.")
+					os.Exit(1)
+				} else {
+					fmt.Println("Understood. Adding new layer...")
+					// retrieving the LayerVersionArn to use when adding the layer to our Lambda function
+					layerVersionARN := *result.LayerVersionArn
+					layerVersionARNSlice := []string{layerVersionARN}
+					fmt.Println("=========")
+					fmt.Println(layerVersionARN)
+
+					input := &lambda.UpdateFunctionConfigurationInput{
+						FunctionName: &cb.Function,
+						Layers:       aws.StringSlice(layerVersionARNSlice),
+					}
+
+					result, err := svc.UpdateFunctionConfiguration(input)
+					if CheckAWSError(err) {
+						os.Exit(1)
+					}
+
+					fmt.Println(result)
+				}
 			}
 		}
 	},

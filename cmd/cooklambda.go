@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"archive/zip"
+	"bufio"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -25,7 +26,9 @@ var cookLambdaCmd = &cobra.Command{
 	Long:    "Cook your Lambda code from the current folder.",
 	Example: "chefcli cook lambda",
 	ValidArgs: []string{
-		"now",
+		"venv",
+		"new",
+		"update",
 	},
 	Args: cobra.OnlyValidArgs,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -60,13 +63,13 @@ var cookLambdaCmd = &cobra.Command{
 			// Check Function name
 			if cb.Function == "" {
 				fmt.Println("There is no Function name. Plese supply a function name in your Recipe.")
-				os.Exit(0)
+				os.Exit(1)
 			}
 
 			// Check Handler name
 			if cb.Handler == "" {
 				fmt.Println("There is no Handler name. Plese supply a handler name in your Recipe.")
-				os.Exit(0)
+				os.Exit(1)
 			} else {
 				cb.Handler = cb.Function + "." + cb.Handler
 			}
@@ -88,13 +91,31 @@ var cookLambdaCmd = &cobra.Command{
 				if _, err := os.Stat(cb.Function + "/lib/python3.8/site-packages"); os.IsNotExist(err) {
 					fmt.Println("No Virtual Env found. Exiting.")
 					CheckError(err)
-					os.Exit(0)
+					os.Exit(1)
 				}
 			}
 
-			// set up the variables with the paths to zip
-			lambdaVenvFolder := cb.Function + "/lib/python3.8/site-packages"
-			functionFile := cb.Function + ".py"
+			//Ensuring that the user wants to leverage the Virtual Environment in the ZIP
+			if Venv {
+				fmt.Println("Virtual environments are for local development. Are you sure you want to include them in your Lambda ZIP package? [yes/no]")
+				input := bufio.NewScanner(os.Stdin)
+				input.Scan()
+				//				fmt.Printf("%v", input.Text())
+				if input.Text() != "yes" && input.Text() != "no" {
+					fmt.Println("Please type either 'yes' or 'no'.")
+					os.Exit(1)
+				}
+				if input.Text() == "no" {
+					fmt.Println("Understood. Use 'chefcli cook layer' to build the relevant layers for your Lambda.")
+					os.Exit(1)
+				} else {
+					fmt.Println("Understood. Proceeding with the virtual environment...")
+					// set up the Venv variable with the path to the site-packages
+					lambdaVenvFolder = cb.Function + "/lib/python3.8/site-packages"
+				}
+			}
+			//setting up the file name for the Python Lambda
+			functionFile = cb.Function + ".py"
 
 			// Get a Buffer to Write To
 			outFile, err := os.Create(cb.Function + ".zip")
@@ -106,7 +127,9 @@ var cookLambdaCmd = &cobra.Command{
 			writer := zip.NewWriter(outFile)
 			// Add some files to the archive.
 			AddFiles(writer, functionFile, "/")
-			AddFiles(writer, lambdaVenvFolder, "")
+			if Venv {
+				AddFiles(writer, lambdaVenvFolder, "")
+			}
 
 			if err != nil {
 				fmt.Println(err)
@@ -122,39 +145,62 @@ var cookLambdaCmd = &cobra.Command{
 			// Check For ARN, Function and Handler names
 			if cb.ARN == "" {
 				fmt.Println("You must supply an ARN.")
-				os.Exit(0)
+				os.Exit(1)
 			}
-
-			// Initialize a session that the SDK will use to load
-			// credentials from the shared credentials file ~/.aws/credentials.
-			sess := session.Must(session.NewSessionWithOptions(session.Options{
-				SharedConfigState: session.SharedConfigEnable,
-			}))
-
-			svc := lambda.New(sess)
 
 			contents, err := ioutil.ReadFile(cb.Zipfile + ".zip")
 			CheckError(err)
+			// Only deploy if the Now flag is set
+			if New {
+				// Initialize a session that the SDK will use to load
+				// credentials from the shared credentials file ~/.aws/credentials.
+				sess := session.Must(session.NewSessionWithOptions(session.Options{
+					SharedConfigState: session.SharedConfigEnable,
+				}))
 
-			lambdaCode := &lambda.FunctionCode{
-				//	S3Bucket:        &cb.Bucket,
-				//	S3Key:           &cb.Zipfile,
-				//	S3ObjectVersion: aws.String("1"),
-				ZipFile: contents,
+				svc := lambda.New(sess)
+
+				lambdaCode := &lambda.FunctionCode{
+					//	S3Bucket:        &cb.Bucket,
+					//	S3Key:           &cb.Zipfile,
+					//	S3ObjectVersion: aws.String("1"),
+					ZipFile: contents,
+				}
+
+				lambdaArgs := &lambda.CreateFunctionInput{
+					Code:         lambdaCode,
+					FunctionName: &cb.Function,
+					Handler:      &cb.Handler,
+					Role:         &cb.ARN,
+					Runtime:      &cb.Runtime,
+				}
+
+				result, err := svc.CreateFunction(lambdaArgs)
+				if err != nil {
+					CheckError(err)
+				} else {
+					fmt.Println(result)
+				}
 			}
 
-			lambdaArgs := &lambda.CreateFunctionInput{
-				Code:         lambdaCode,
-				FunctionName: &cb.Function,
-				Handler:      &cb.Handler,
-				Role:         &cb.ARN,
-				Runtime:      &cb.Runtime,
-			}
+			if Update {
+				// Initialize a session that the SDK will use to load
+				// credentials from the shared credentials file ~/.aws/credentials.
+				sess := session.Must(session.NewSessionWithOptions(session.Options{
+					SharedConfigState: session.SharedConfigEnable,
+				}))
 
-			result, err := svc.CreateFunction(lambdaArgs)
-			if err != nil {
-				CheckError(err)
-			} else {
+				svc := lambda.New(sess)
+
+				input := &lambda.UpdateFunctionCodeInput{
+					FunctionName: &cb.Function,
+					ZipFile:      contents,
+				}
+
+				result, err := svc.UpdateFunctionCode(input)
+				if CheckAWSError(err) {
+					os.Exit(1)
+				}
 				fmt.Println(result)
 			}
 		}
@@ -163,14 +209,10 @@ var cookLambdaCmd = &cobra.Command{
 
 func init() {
 
-	cookLambdaCmd.PersistentFlags().BoolVar(&Now, "now", false, "function description.")
-	cookLambdaCmd.PersistentFlags().BoolVar(&Update, "update", false, "function description.")
-	// cookLambdaCmd.PersistentFlags().StringVar(&lambdaHandler, "handler", "h", "handler description.")
-	// cookLambdaCmd.PersistentFlags().StringVar(&lambdaARN, "arn", "", "resource description.")
-	// cookLambdaCmd.PersistentFlags().StringVar(&lambdaRuntime, "runtime", "r", "runtime description.")
+	cookLambdaCmd.PersistentFlags().BoolVar(&New, "new", false, "cook new Lambda function.")
+	cookLambdaCmd.PersistentFlags().BoolVar(&Update, "update", false, "cook update for a Lambda function.")
+	cookLambdaCmd.PersistentFlags().BoolVar(&Venv, "venv", false, "add virtual environment packages to the ZIP archive.")
 
-	// deployLambdaCmd.MarkPersistentFlagRequired("zipfile")
-	// deployLambdaCmd.MarkPersistentFlagRequired("function")
-	// deployLambdaCmd.MarkPersistentFlagRequired("handler")
-	// deployLambdaCmd.MarkPersistentFlagRequired("runtime")
+	// keeping for reference
+	// deployLambdaCmd.MarkPersistentFlagRequired("")
 }
